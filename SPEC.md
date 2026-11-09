@@ -10,7 +10,8 @@ Personal calorie tracker. No server; AI via the user's own OpenAI key (BYOK); op
 
 ### Main (today)
 - Title: current date (re-evaluated on resume, so it rolls over at midnight).
-- Gauge: consumed / limit kcal, "N left" or "N over". Arc turns error-colored when over the limit.
+- Gauge: big number = kcal left ("kcal left"), or kcal over the limit in the error color ("kcal over");
+  below it "consumed of limit eaten". The arc shows consumed / limit and turns error-colored when over the limit.
   Limit = goal + today's activity, shown as "2000 + 350 activity". Activity = Health Connect kcal (0 when activity
   calories are off) + manual correction, never below 0.
 - Tap the activity line to enter today's activity manually. Saving value V stores correction = V − Health Connect kcal;

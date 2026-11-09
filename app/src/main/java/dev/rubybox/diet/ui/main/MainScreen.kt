@@ -290,8 +290,19 @@ private fun CalorieGauge(
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(consumed.kcalStr(), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
-            Text("of ${goal.kcalStr()} kcal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val left = goal - consumed
+            Text(
+                kotlin.math.abs(left).kcalStr(),
+                style = MaterialTheme.typography.displayMedium,
+                fontWeight = FontWeight.Bold,
+                color = if (over) color else MaterialTheme.colorScheme.onSurface,
+            )
+            Text(if (over) "kcal over" else "kcal left", style = MaterialTheme.typography.titleMedium, color = color)
+            Text(
+                "${consumed.kcalStr()} of ${goal.kcalStr()} eaten",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -312,12 +323,6 @@ private fun CalorieGauge(
                     modifier = Modifier.size(14.dp),
                 )
             }
-            val left = goal - consumed
-            Text(
-                if (left >= 0) "${left.kcalStr()} left" else "${(-left).kcalStr()} over",
-                style = MaterialTheme.typography.titleMedium,
-                color = color,
-            )
         }
     }
 }
