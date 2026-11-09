@@ -11,11 +11,31 @@ class Repository(private val db: AppDatabase, private val onChanged: () -> Unit)
     fun activity(date: LocalDate) = db.activity().observe(date.toString())
     fun allActivity() = db.activity().observeAll()
 
-    /** Stores a day's active kcal; schedules a sync only if the value changed. */
+    /** Stores a day's Health Connect kcal, keeping the correction; schedules a sync only if the value changed. */
     suspend fun setActivity(date: LocalDate, kcal: Double) {
         val rounded = Math.round(kcal).toDouble()
-        if (db.activity().get(date.toString())?.activeKcal == rounded) return
-        db.activity().upsert(DayActivity(date.toString(), rounded, System.currentTimeMillis()))
+        val existing = db.activity().get(date.toString())
+        if (existing?.activeKcal == rounded) return
+        val now = System.currentTimeMillis()
+        db.activity().upsert(
+            existing?.copy(activeKcal = rounded, updatedAt = now) ?: DayActivity(date.toString(), rounded, now)
+        )
+        onChanged()
+    }
+
+    /**
+     * Sets the shown activity for [date] to [value] by storing correction = value - Health Connect kcal.
+     * When [useHealthConnect] is off, the Health Connect part counts as 0. [value] = null resets the correction.
+     */
+    suspend fun setActivityManual(date: LocalDate, value: Double?, useHealthConnect: Boolean) {
+        val existing = db.activity().get(date.toString())
+        val hs = if (useHealthConnect) existing?.activeKcal ?: 0.0 else 0.0
+        val correction = value?.let { Math.round(it - hs).toDouble() } ?: 0.0
+        val now = System.currentTimeMillis()
+        db.activity().upsert(
+            existing?.copy(correctionKcal = correction, updatedAt = now)
+                ?: DayActivity(date.toString(), 0.0, now, correction)
+        )
         onChanged()
     }
 

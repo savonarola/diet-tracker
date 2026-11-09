@@ -45,6 +45,7 @@ class Prefs(context: Context) {
         val customUrl = stringPreferencesKey("openai_base_url")
         fun model(p: AiProvider) = stringPreferencesKey(if (p == AiProvider.OPENAI) "openai_model" else "model_${p.id}")
         val useActivity = booleanPreferencesKey("use_activity")
+        val preferHealthSync = booleanPreferencesKey("prefer_health_sync")
         val syncAt = longPreferencesKey("sync_at")
         val syncError = stringPreferencesKey("sync_error")
     }
@@ -61,6 +62,8 @@ class Prefs(context: Context) {
     }
     /** Add Health Connect active calories to the daily goal. */
     val useActivity: Flow<Boolean> = ds.data.map { it[K.useActivity] ?: false }
+    /** Use only Health Sync data for a day when it has any. */
+    val preferHealthSync: Flow<Boolean> = ds.data.map { it[K.preferHealthSync] ?: false }
     val syncStatus: Flow<SyncStatus> = ds.data.map { SyncStatus(it[K.syncAt], it[K.syncError]) }
 
     suspend fun setKcalGoal(value: Int) {
@@ -69,6 +72,10 @@ class Prefs(context: Context) {
 
     suspend fun setUseActivity(value: Boolean) {
         ds.edit { it[K.useActivity] = value }
+    }
+
+    suspend fun setPreferHealthSync(value: Boolean) {
+        ds.edit { it[K.preferHealthSync] = value }
     }
 
     suspend fun setProvider(p: AiProvider) {

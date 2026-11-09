@@ -31,8 +31,9 @@ class PrivacyActivity : ComponentActivity() {
                     ) {
                         Text("How Diet uses health data", style = MaterialTheme.typography.headlineSmall)
                         Text(
-                            "Diet reads only your active calories burned. It adds them to your daily calorie goal, " +
-                                "so days with more activity allow more food."
+                            "Diet reads your active calories burned. It adds them to your daily calorie goal, " +
+                                "so days with more activity allow more food. Diet also reads total and basal " +
+                                "calories, but only to show a per-app breakdown when you press Test in Settings."
                         )
                         Text(
                             "The data stays on this phone. If you turn on Dropbox sync, each day's active-calorie " +

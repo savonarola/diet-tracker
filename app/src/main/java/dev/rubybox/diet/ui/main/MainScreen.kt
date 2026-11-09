@@ -1,6 +1,14 @@
 package dev.rubybox.diet.ui.main
 
 import androidx.compose.animation.core.animateFloatAsState
+import dev.rubybox.diet.ui.toNum
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.draw.clip
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -86,9 +94,14 @@ data class MainState(
     val date: LocalDate = LocalDate.now(),
     val entries: List<LogEntry> = emptyList(),
     val goal: Int = Prefs.DEFAULT_GOAL,
-    /** Active kcal from Health Connect (0 when the feature is off). */
-    val activity: Double = 0.0,
+    /** Health Connect part of the activity (0 when the feature is off). */
+    val healthKcal: Double = 0.0,
+    /** Manual correction added to [healthKcal]. */
+    val correction: Double = 0.0,
+    val useHealthConnect: Boolean = false,
 ) {
+    /** Shown activity, never below 0. */
+    val activity = maxOf(0.0, healthKcal + correction)
     val limit = goal + activity
     val kcal = entries.sumOf { it.kcal }
     val fat = entries.sumOf { it.fatG }
@@ -110,13 +123,28 @@ class MainViewModel(
         prefs.kcalGoal,
         date.flatMapLatest { repo.activity(it) },
         prefs.useActivity,
-    ) { d, e, g, a, use -> MainState(d, e, g, if (use) a?.activeKcal ?: 0.0 else 0.0) }
+    ) { d, e, g, a, use ->
+        MainState(
+            date = d,
+            entries = e,
+            goal = g,
+            healthKcal = if (use) a?.activeKcal ?: 0.0 else 0.0,
+            correction = a?.correctionKcal ?: 0.0,
+            useHealthConnect = use,
+        )
+    }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), MainState())
 
     /** Called on resume: rolls the date over and pulls activity calories from Health Connect. */
     fun refresh() {
         date.value = LocalDate.now()
         viewModelScope.launch { tracker.refresh() }
+    }
+
+    /** Sets today's shown activity to [value]; null resets the correction. */
+    fun setActivity(value: Double?) {
+        val s = state.value
+        viewModelScope.launch { repo.setActivityManual(s.date, value, s.useHealthConnect) }
     }
 
     fun delete(entry: LogEntry) {
@@ -145,6 +173,7 @@ fun MainScreen(onNavigate: (String) -> Unit) {
     val drawer = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var toDelete by remember { mutableStateOf<LogEntry?>(null) }
+    var editActivity by remember { mutableStateOf(false) }
 
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -183,7 +212,7 @@ fun MainScreen(onNavigate: (String) -> Unit) {
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
-                item { CalorieGauge(s.kcal, s.goal, s.activity, Modifier.fillMaxWidth()) }
+                item { CalorieGauge(s.kcal, s.goal, s.activity, { editActivity = true }, Modifier.fillMaxWidth()) }
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Button(onClick = { onNavigate(Routes.ADD_NEW) }, modifier = Modifier.weight(1f)) {
@@ -214,6 +243,14 @@ fun MainScreen(onNavigate: (String) -> Unit) {
         }
     }
 
+    if (editActivity) {
+        ActivityDialog(
+            s = s,
+            onSave = { vm.setActivity(it); editActivity = false },
+            onDismiss = { editActivity = false },
+        )
+    }
+
     toDelete?.let { e ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
@@ -228,7 +265,13 @@ fun MainScreen(onNavigate: (String) -> Unit) {
 }
 
 @Composable
-private fun CalorieGauge(consumed: Double, baseGoal: Int, activity: Double, modifier: Modifier = Modifier) {
+private fun CalorieGauge(
+    consumed: Double,
+    baseGoal: Int,
+    activity: Double,
+    onActivityClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val goal = baseGoal + activity
     val over = consumed > goal
     val progress = if (goal > 0) (consumed / goal).toFloat().coerceIn(0f, 1f) else 0f
@@ -249,11 +292,24 @@ private fun CalorieGauge(consumed: Double, baseGoal: Int, activity: Double, modi
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(consumed.kcalStr(), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold)
             Text("of ${goal.kcalStr()} kcal", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (activity > 0) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(onClick = onActivityClick)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
                 Text(
                     "$baseGoal + ${activity.kcalStr()} activity",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit activity calories",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(14.dp),
                 )
             }
             val left = goal - consumed
@@ -264,6 +320,43 @@ private fun CalorieGauge(consumed: Double, baseGoal: Int, activity: Double, modi
             )
         }
     }
+}
+
+@Composable
+private fun ActivityDialog(s: MainState, onSave: (Double?) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf(s.activity.kcalStr()) }
+    val value = text.toNum()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Activity calories") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Today, kcal") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                val sign = if (s.correction >= 0) "+" else "−"
+                Text(
+                    "Health Connect: ${s.healthKcal.kcalStr()}, correction: $sign${kotlin.math.abs(s.correction).kcalStr()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(value) }, enabled = value != null && value >= 0) { Text("Save") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { onSave(null) }) { Text("Reset") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }
 
 @Composable

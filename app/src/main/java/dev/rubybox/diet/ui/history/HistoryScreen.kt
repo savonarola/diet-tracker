@@ -47,7 +47,7 @@ import java.util.Locale
 data class HistoryState(
     val totals: Map<LocalDate, Double> = emptyMap(),
     val goal: Int = Prefs.DEFAULT_GOAL,
-    /** Active kcal per day; empty when activity is not added to the goal. */
+    /** Shown activity per day: Health Connect kcal (when used) plus manual correction. */
     val activity: Map<LocalDate, Double> = emptyMap(),
 ) {
     fun limit(date: LocalDate): Double = goal + (activity[date] ?: 0.0)
@@ -58,8 +58,7 @@ class HistoryViewModel(repo: Repository, prefs: Prefs) : ViewModel() {
         HistoryState(
             totals.mapNotNull { t -> runCatching { LocalDate.parse(t.date) to t.kcal }.getOrNull() }.toMap(),
             goal,
-            if (use) act.mapNotNull { a -> runCatching { LocalDate.parse(a.date) to a.activeKcal }.getOrNull() }.toMap()
-            else emptyMap(),
+            act.mapNotNull { a -> runCatching { LocalDate.parse(a.date) to a.total(use) }.getOrNull() }.toMap(),
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HistoryState())
 }

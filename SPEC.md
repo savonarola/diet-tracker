@@ -11,7 +11,10 @@ Personal calorie tracker. No server; AI via the user's own OpenAI key (BYOK); op
 ### Main (today)
 - Title: current date (re-evaluated on resume, so it rolls over at midnight).
 - Gauge: consumed / limit kcal, "N left" or "N over". Arc turns error-colored when over the limit.
-  Limit = goal + today's active kcal (when activity calories are on), shown as "2000 + 350 activity".
+  Limit = goal + today's activity, shown as "2000 + 350 activity". Activity = Health Connect kcal (0 when activity
+  calories are off) + manual correction, never below 0.
+- Tap the activity line to enter today's activity manually. Saving value V stores correction = V − Health Connect kcal;
+  later refreshes change the Health Connect part only. Reset sets the correction to 0. Today only.
 - Buttons: **Add new** (AI chat) / **Add existing** (saved meals).
 - Macros: fat / protein / carbs in grams for the day.
 - List of today's entries (title, grams, kcal). Delete with confirm dialog, no undo. Gauge and macros update.
@@ -35,7 +38,7 @@ Personal calorie tracker. No server; AI via the user's own OpenAI key (BYOK); op
 
 ### History
 - Scrollable month calendar (newest month first, back to the first logged month); each day shows total kcal,
-  colored under/over the current goal plus that day's stored active kcal. Days are not openable (v1).
+  colored under/over the current goal plus that day's activity (Health Connect kcal + correction). Days are not openable (v1).
 
 ### Goals
 - Daily kcal target (default 2000).
@@ -47,7 +50,12 @@ Personal calorie tracker. No server; AI via the user's own OpenAI key (BYOK); op
 - Activity calories: switch "Add activity calories to the daily goal"; Health Connect status (unavailable / install /
   Allow access / granted), Test (today's active kcal), Open Health Connect. Reads `ActiveCaloriesBurnedRecord`
   (active only, not BMR) via aggregate, for today and the 2 previous days, each time the main screen resumes
-  (foreground only). Huawei Health → Health Sync app → Health Connect. `PrivacyActivity` is the required rationale screen.
+  (foreground only). Huawei Health → Health Sync app → Health Connect.
+  "Prefer Health Sync" checkbox: when Health Sync (`nl.appyhapps.healthsync`) has data for a day, count only its data
+  (`dataOriginFilter`); otherwise count all sources.
+  Test shows the counted value plus a per-source breakdown for today of Active, Total and Basal calories
+  (all-sources aggregate, then each data origin). Total and Basal read permissions are requested with Allow access
+  and only used by Test. `PrivacyActivity` is the required rationale screen.
 - AI provider picker: OpenAI (`https://api.openai.com/v1`) / OpenRouter (`https://openrouter.ai/api/v1`) / Custom (base URL field).
   One API key per provider (Keystore-encrypted, local only, never synced, excluded from backup) and one selected model per provider.
 - Model picker: editable dropdown filled from the provider's `GET /models`, newest first, filtered to models usable for meals
@@ -62,13 +70,13 @@ Personal calorie tracker. No server; AI via the user's own OpenAI key (BYOK); op
 ## Data
 - `SavedMeal`: UUID id, title, default weight, kcal/fat/carbs/protein per 100 g, `updatedAt`, `deleted` (tombstone),
   local-only usage stats (count, last used) for ordering.
-- `DayActivity`: date, active kcal (rounded), updatedAt. Stored per day so past limits stay correct.
+- `DayActivity`: date, Health Connect active kcal (rounded, overwritten on refresh), manual correction kcal, updatedAt. Stored per day so past limits stay correct.
 - `LogEntry`: self-contained snapshot — date, title, weight, kcal/fat/carbs/protein totals, createdAt. No reference to saved meals.
 
 ## Dropbox sync (app folder)
 - `meals.yaml` — saved meals incl. tombstones. Merge by id, newer `updated_at` wins.
 - `days.yaml` — log entries grouped by date. Merge: any day with local entries overwrites the remote day;
-  remote days absent locally are imported. `activity_kcal` (date → kcal) in the same file, same rule.
+  remote days absent locally are imported. `activity_kcal` and `activity_correction_kcal` (date → kcal) in the same file, same rule.
 - Runs on app start, ~15 s after any change (WorkManager, network required), and on "Sync now".
 - The OpenAI key is never written to Dropbox.
 

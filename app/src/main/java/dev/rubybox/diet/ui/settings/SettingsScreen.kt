@@ -2,6 +2,7 @@ package dev.rubybox.diet.ui.settings
 
 import dev.rubybox.diet.sync.DropboxClient
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Switch
 import androidx.compose.ui.platform.LocalContext
 import androidx.health.connect.client.PermissionController
@@ -290,21 +291,28 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     // ---- Activity calories (Health Connect) ----
     var useActivity by mutableStateOf(false)
         private set
+    var preferHealthSync by mutableStateOf(false)
+        private set
     var hcStatus by mutableStateOf(c.activitySource.status())
         private set
     var hcGranted by mutableStateOf(false)
         private set
+    /** Total and basal calories are granted too (used only by Test). */
+    var hcAllGranted by mutableStateOf(false)
+        private set
+    private var testAfterPermission = false
     var hcTesting by mutableStateOf(false)
         private set
     var hcTestResult by mutableStateOf<TestResult?>(null)
         private set
-    val hcPermissions get() = c.activitySource.permissions
+    val hcPermissions get() = c.activitySource.allPermissions
     fun hcInstallIntent() = c.activitySource.installIntent()
     fun hcSettingsIntent() = c.activitySource.settingsIntent()
 
     init {
         viewModelScope.launch {
             useActivity = c.prefs.useActivity.first()
+            preferHealthSync = c.prefs.preferHealthSync.first()
             refreshHealth()
         }
     }
@@ -312,7 +320,12 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     /** Re-checks availability and permission (e.g. after returning from Health Connect). */
     fun refreshHealth() {
         hcStatus = c.activitySource.status()
-        viewModelScope.launch { hcGranted = runCatching { c.activitySource.hasPermission() }.getOrDefault(false) }
+        viewModelScope.launch { checkPermissions() }
+    }
+
+    private suspend fun checkPermissions() {
+        hcGranted = runCatching { c.activitySource.hasPermission() }.getOrDefault(false)
+        hcAllGranted = runCatching { c.activitySource.hasAllPermissions() }.getOrDefault(false)
     }
 
     /** Returns true if the caller should launch the permission request. */
@@ -325,22 +338,53 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
         return value && hcStatus == ActivitySource.Status.AVAILABLE && !hcGranted
     }
 
-    fun onPermissionResult(granted: Set<String>) {
-        hcGranted = granted.containsAll(hcPermissions)
-        if (hcGranted) {
-            viewModelScope.launch { c.activity.refresh() }
-        } else {
-            message = "Health Connect access not granted"
+    fun onPreferHealthSync(value: Boolean) {
+        preferHealthSync = value
+        hcTestResult = null
+        viewModelScope.launch {
+            c.prefs.setPreferHealthSync(value)
+            c.activity.refresh()
         }
     }
 
-    fun testActivity() {
+    @Suppress("UNUSED_PARAMETER")
+    fun onPermissionResult(granted: Set<String>) {
+        viewModelScope.launch {
+            checkPermissions()
+            if (!hcGranted) {
+                testAfterPermission = false
+                message = "Health Connect access not granted"
+                return@launch
+            }
+            c.activity.refresh()
+            if (testAfterPermission) {
+                testAfterPermission = false
+                testActivity()
+            }
+        }
+    }
+
+    /** Returns true if the caller should first request the extra permissions; the test then runs after the result. */
+    fun onTestClick(): Boolean {
+        if (!hcAllGranted) {
+            testAfterPermission = true
+            return true
+        }
+        testActivity()
+        return false
+    }
+
+    private fun testActivity() {
         if (hcTesting) return
         hcTesting = true
         hcTestResult = null
         viewModelScope.launch {
-            hcTestResult = runCatching { c.activitySource.activeKcal(LocalDate.now()) }.fold(
-                onSuccess = { TestResult(true, "Today: ${it.kcalStr()} kcal active") },
+            hcTestResult = runCatching {
+                val today = LocalDate.now()
+                val counted = c.activitySource.activeKcal(today, preferHealthSync)
+                "Counted today: ${counted.kcalStr()} kcal active\n" + c.activitySource.diagnose(today)
+            }.fold(
+                onSuccess = { TestResult(true, it) },
                 onFailure = { TestResult(false, it.message ?: it.javaClass.simpleName) },
             )
             if (useActivity) c.activity.refresh()
@@ -442,6 +486,11 @@ fun SettingsScreen(onBack: () -> Unit) {
                     onCheckedChange = { if (vm.onUseActivity(it)) hcPermissionLauncher.launch(vm.hcPermissions) },
                 )
             }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = vm.preferHealthSync, onCheckedChange = vm::onPreferHealthSync)
+                Text("Prefer Health Sync", Modifier.weight(1f))
+            }
+            Hint("When Health Sync has data for a day, count only its data and ignore the phone's own estimate.")
             when (vm.hcStatus) {
                 ActivitySource.Status.UNAVAILABLE ->
                     Hint("Health Connect isn't available on this phone (it needs Android 9+ with Google Play).")
@@ -458,7 +507,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                         Text("Access granted", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                     }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = vm::testActivity, enabled = vm.hcGranted && !vm.hcTesting) { Text("Test") }
+                        OutlinedButton(onClick = { if (vm.onTestClick()) hcPermissionLauncher.launch(vm.hcPermissions) }, enabled = vm.hcGranted && !vm.hcTesting) { Text("Test") }
                         TextButton(onClick = { runCatching { context.startActivity(vm.hcSettingsIntent()) } }) {
                             Text("Open Health Connect")
                         }

@@ -1,6 +1,7 @@
 package dev.rubybox.diet.data
 
 import android.content.Context
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Delete
@@ -54,14 +55,21 @@ data class LogEntry(
 
 data class DayTotal(val date: String, val kcal: Double)
 
-/** Active (exercise) calories for a day, read from Health Connect. Raises that day's limit. */
+/** Active (exercise) calories for a day. Raises that day's limit. */
 @Entity(tableName = "day_activity")
 data class DayActivity(
     /** ISO yyyy-MM-dd */
     @PrimaryKey val date: String,
+    /** From Health Connect; overwritten on every refresh. */
     val activeKcal: Double,
     val updatedAt: Long,
-)
+    /** Manual correction; kept across refreshes. */
+    @ColumnInfo(defaultValue = "0") val correctionKcal: Double = 0.0,
+) {
+    /** Shown activity: Health Connect value (when used) plus correction, never below 0. */
+    fun total(useHealthConnect: Boolean): Double =
+        maxOf(0.0, (if (useHealthConnect) activeKcal else 0.0) + correctionKcal)
+}
 
 @Dao
 interface ActivityDao {
@@ -126,7 +134,7 @@ interface LogDao {
     suspend fun delete(entry: LogEntry)
 }
 
-@Database(entities = [SavedMeal::class, LogEntry::class, DayActivity::class], version = 2, exportSchema = true)
+@Database(entities = [SavedMeal::class, LogEntry::class, DayActivity::class], version = 3, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun meals(): MealDao
     abstract fun log(): LogDao
@@ -142,9 +150,15 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `day_activity` ADD COLUMN `correctionKcal` REAL NOT NULL DEFAULT 0")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "diet.db")
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
     }
 }

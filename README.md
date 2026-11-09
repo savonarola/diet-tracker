@@ -16,7 +16,7 @@ Diet Tracker is an Android calorie tracker. It has no server. AI meal estimates 
 - The app stores all data on the device.
 - The app encrypts API keys with the Android Keystore. Keys never go to Dropbox or to Android backup.
 - Dropbox sync is optional. The app only accesses its own app folder.
-- The app reads only active calories from Health Connect. It never writes to Health Connect.
+- The app reads active, total and basal calories from Health Connect. Only active calories raise the limit. Total and basal calories appear only in the Settings test breakdown. The app never writes to Health Connect.
 
 ## Requirements
 

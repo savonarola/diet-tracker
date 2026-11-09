@@ -52,6 +52,8 @@ data class DaysFile(
     val days: Map<String, List<EntryDto>> = emptyMap(),
     /** Active kcal per day (from Health Connect), which raised that day's limit. */
     @SerialName("activity_kcal") val activityKcal: Map<String, Double> = emptyMap(),
+    /** Manual activity correction per day, added to activity_kcal. */
+    @SerialName("activity_correction_kcal") val activityCorrectionKcal: Map<String, Double> = emptyMap(),
 )
 
 @Serializable
@@ -91,7 +93,7 @@ private fun EntryDto.toEntity(date: String) = LogEntry(
 /**
  * meals.yaml: merged by id, newer updated_at wins (tombstones included).
  * days.yaml: a day with local entries overwrites the remote day; remote-only days are imported.
- *   activity_kcal: same rule per day.
+ *   activity_kcal and activity_correction_kcal: same rule per day.
  * The OpenAI key is never part of any synced file.
  */
 class SyncManager(
@@ -138,18 +140,24 @@ class SyncManager(
             .filterValues { it.isNotEmpty() }
             .toSortedMap()
 
-        // Activity: local values (fresh from Health Connect) win; remote-only days are imported.
-        val localActivity = db.activity().all().associate { it.date to it.activeKcal }
-        val activityImport = remoteDays.activityKcal.filterKeys { it !in localActivity }
-        if (activityImport.isNotEmpty()) {
-            val now = System.currentTimeMillis()
-            db.activity().upsertAll(activityImport.map { (d, k) -> DayActivity(d, k, now) })
+        // Activity and correction: a day stored locally wins; remote-only days are imported.
+        val localActivity = db.activity().all().associateBy { it.date }
+        val remoteActivityDates = remoteDays.activityKcal.keys + remoteDays.activityCorrectionKcal.keys
+        val now = System.currentTimeMillis()
+        val activityImport = remoteActivityDates.filter { it !in localActivity }.map { d ->
+            DayActivity(d, remoteDays.activityKcal[d] ?: 0.0, now, remoteDays.activityCorrectionKcal[d] ?: 0.0)
         }
-        val mergedActivity = (remoteDays.activityKcal + localActivity).filterValues { it > 0 }.toSortedMap()
+        if (activityImport.isNotEmpty()) db.activity().upsertAll(activityImport)
+        val allActivity = localActivity.values + activityImport
+        val mergedActivity = allActivity.associate { it.date to it.activeKcal }.filterValues { it > 0 }.toSortedMap()
+        val mergedCorrection = allActivity.associate { it.date to it.correctionKcal }.filterValues { it != 0.0 }.toSortedMap()
 
         dropbox.upload(
             DAYS_PATH,
-            yaml.encodeToString(DaysFile.serializer(), DaysFile(days = merged, activityKcal = mergedActivity)),
+            yaml.encodeToString(
+                DaysFile.serializer(),
+                DaysFile(days = merged, activityKcal = mergedActivity, activityCorrectionKcal = mergedCorrection),
+            ),
         )
     }
 
